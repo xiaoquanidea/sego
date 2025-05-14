@@ -55,13 +55,17 @@ func (seg *Segmenter) LoadDictionary(files string) {
 	seg.dict = NewDictionary()
 	for _, file := range strings.Split(files, ",") {
 		log.Printf("载入sego词典 %s", file)
-		// 打开文件：优先使用注入的 fsys，否则使用 os.Open
+		// 打开文件：若注入 fsys，则先尝试从 fsys 打开，再 fallback 到 os.Open
 		var (
 			dictFile fs.File
 			err      error
 		)
 		if seg.fsys != nil {
 			dictFile, err = seg.fsys.Open(file)
+			if err != nil {
+				// fsys 中未找到，回退到本地文件系统
+				dictFile, err = os.Open(file)
+			}
 		} else {
 			dictFile, err = os.Open(file)
 		}
