@@ -1,9 +1,10 @@
-//Go中文分词
+// Go中文分词
 package sego
 
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"log"
 	"math"
 	"os"
@@ -20,6 +21,7 @@ const (
 // 分词器结构体
 type Segmenter struct {
 	dict *Dictionary
+	fsys fs.FS
 }
 
 // 该结构体用于记录Viterbi算法中某字元处的向前分词跳转信息
@@ -33,19 +35,36 @@ func (seg *Segmenter) Dictionary() *Dictionary {
 	return seg.dict
 }
 
+// SetFS 注入自定义文件系统，例如 fstest.MapFS
+func (seg *Segmenter) SetFS(fsys fs.FS) {
+	seg.fsys = fsys
+}
+
 // 从文件中载入词典
 //
 // 可以载入多个词典文件，文件名用","分隔，排在前面的词典优先载入分词，比如
-// 	"用户词典.txt,通用词典.txt"
+//
+//	"用户词典.txt,通用词典.txt"
+//
 // 当一个分词既出现在用户词典也出现在通用词典中，则优先使用用户词典。
 //
 // 词典的格式为（每个分词一行）：
+//
 //	分词文本 频率 词性
 func (seg *Segmenter) LoadDictionary(files string) {
 	seg.dict = NewDictionary()
 	for _, file := range strings.Split(files, ",") {
 		log.Printf("载入sego词典 %s", file)
-		dictFile, err := os.Open(file)
+		// 打开文件：优先使用注入的 fsys，否则使用 os.Open
+		var (
+			dictFile fs.File
+			err      error
+		)
+		if seg.fsys != nil {
+			dictFile, err = seg.fsys.Open(file)
+		} else {
+			dictFile, err = os.Open(file)
+		}
 		defer dictFile.Close()
 		if err != nil {
 			log.Fatalf("无法载入字典文件 \"%s\" \n", file)
@@ -128,9 +147,11 @@ func (seg *Segmenter) LoadDictionary(files string) {
 // 对文本分词
 //
 // 输入参数：
+//
 //	bytes	UTF8文本的字节数组
 //
 // 输出：
+//
 //	[]Segment	划分的分词
 func (seg *Segmenter) Segment(bytes []byte) []Segment {
 	return seg.internalSegment(bytes, false)
@@ -227,8 +248,9 @@ func (seg *Segmenter) segmentWords(text []Text, searchMode bool) []Segment {
 }
 
 // 更新跳转信息:
-// 	1. 当该位置从未被访问过时(jumper.minDistance为零的情况)，或者
-//	2. 当该位置的当前最短路径大于新的最短路径时
+//  1. 当该位置从未被访问过时(jumper.minDistance为零的情况)，或者
+//  2. 当该位置的当前最短路径大于新的最短路径时
+//
 // 将当前位置的最短路径值更新为baseDistance加上新分词的概率
 func updateJumper(jumper *jumper, baseDistance float32, token *Token) {
 	newDistance := baseDistance + token.distance
